@@ -1,0 +1,11 @@
+.env
+credentials.json
+token.pickle
+__pycache__/
+*.py[cod]
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
