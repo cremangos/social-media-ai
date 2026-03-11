@@ -1,148 +1,152 @@
 ---
 name: social-post
 description: >
-  Generate and publish AI-powered social media posts for any niche site.
-  Given an article URL and topic, uses Perplexity to summarize, DALL-E 3 to
-  generate an image, and Claude 3.7 Sonnet to write platform-specific posts
-  for Instagram, Facebook, LinkedIn, and Twitter/X. Logs everything to Google
-  Sheets and optionally publishes live via Meta Graph API and Tweepy.
-  
-  Use when user says "post to Instagram", "create social posts", "social media
-  post for this article", "promote this on Instagram", "schedule a post".
+  Create and publish AI-powered social media posts for any article or topic.
+  The AI agent reads the article, writes platform-specific posts (Instagram,
+  Facebook, LinkedIn, Twitter/X), generates a matching image, shows a preview
+  for approval, then uses a thin Python poster to publish via platform APIs.
+  No external AI APIs needed — the agent does all content generation natively.
+
+  Use when user says "post to Instagram", "create social posts", "social post
+  for this article", "promote this on social media", "schedule a post".
 allowed-tools:
   - Read
   - Write
   - Edit
   - Bash
+  - WebFetch
+  - WebSearch
+  - Task
 ---
 
-# Social Post — AI Social Media Generator
+# Social Post Skill
 
-Generates platform-optimized social posts from any article URL using the
-pipeline in `main.py`. Port of the n8n `Social_media_ai_system` workflow.
+You (the AI agent) do ALL the content creation. The Python scripts only handle
+the mechanical platform API calls to actually publish.
 
-## Pipeline (what happens under the hood)
-
-```
-Article URL  →  Perplexity sonar-pro (summarize)
-             →  GPT-4o-mini (DALL-E image prompt)
-             →  DALL-E 3 1024×1024 (generate image)
-             →  Claude 3.7 Sonnet × 4 (write posts)
-             →  Gmail preview + CLI approval
-             →  Google Sheets (log posts + image URL)
-             →  Instagram Graph API + Tweepy (optional publish)
-```
-
-## Skill Directory
+## Architecture
 
 ```
-social-media-ai/
-├── main.py              ← Entry point (run this)
-├── src/
-│   ├── pipeline.py      ← Perplexity → GPT-4o-mini → DALL-E → Claude
-│   ├── sheets.py        ← Google Sheets read/write
-│   ├── approval.py      ← Gmail preview + CLI approval
-│   └── publisher.py     ← Instagram Graph API + Tweepy
-├── .env                 ← API keys (copy from .env.example)
-└── requirements.txt
+YOU (agent)
+  1. Read article via read_url_content / browser
+  2. Write 4 platform posts (Instagram, FB, LinkedIn, Twitter)
+  3. Generate image via generate_image tool
+  4. Show preview → user approves
+  5. Run: python poster.py --platform instagram --caption "..." --image path/to/img.png
 ```
 
 ## Workflow
 
-### Step 1 — Collect inputs
+### Step 1 — Gather inputs
 Ask the user for:
-- **Article URL** (required) — the published page to promote
-- **Topic/headline** (optional) — brief hint, e.g. "Guitar Tone Guide"
-- **Mode** — review (CLI approval) / auto-approve / publish live
+- **Article URL** or **topic** to post about
+- **Which platforms** (default: all — Instagram, Facebook, LinkedIn, Twitter)
+- **Tone** — educational, promotional, conversational (default: conversational)
+- **Niche/brand** — infer from context if working in a project (e.g. musicgearspecialist)
 
-### Step 2 — Check prerequisites
-Verify the following before running:
-```bash
-# Check .env exists with required keys
-ls /home/corsa/antigravity_projects/social-media-ai/.env
+### Step 2 — Read and understand the article
+Use `read_url_content` to fetch the article. If behind a login or JS-heavy,
+use `browser_subagent`.
 
-# Check required keys are set
-grep -E "OPENAI_API_KEY|ANTHROPIC_API_KEY|PERPLEXITY_API_KEY" \
-  /home/corsa/antigravity_projects/social-media-ai/.env | grep -v "^#"
+Extract:
+- Core topic and main takeaway
+- 2-3 key facts or statistics to anchor the posts
+- Any product names, prices, or recommendations to highlight
+
+### Step 3 — Generate the image
+Use the `generate_image` tool. Prompt should be:
+- Photorealistic, vibrant, relevant to the topic
+- Square format (1:1) — optimized for Instagram
+- NO text overlays, NO logos
+- Style: natural, lifestyle photography feel
+
+Example prompt for a guitar article:
+> "Close-up lifestyle photo of a vintage electric guitar in warm golden studio 
+> lighting, rich amber tones, bokeh background with guitar pedals. Square format,
+> professional product photography feel, no text."
+
+Save the image path for use in Step 5.
+
+### Step 4 — Write platform posts
+
+Write all 4 posts in one pass. Use the article facts from Step 2.
+
+#### Instagram (≤2,200 chars, ideal 150-220 word body)
+- Hook line (first 125 chars visible before "more" — make it count)
+- Body: 3-5 short punchy paragraphs, emojis used naturally (not excessively)
+- Call to action: "Link in bio 🔗" or "Save this for later 📌"
+- Hashtags: 10-15 niche hashtags on a new line at the end
+- Format: `[hook]\n\n[body]\n\n[CTA]\n\n[hashtags]`
+
+#### Facebook (≤500 words)
+- Conversational, no formal tone
+- 2-3 short paragraphs
+- End with a question to drive comments
+- 0-3 hashtags only (FB penalizes hashtag spam)
+
+#### LinkedIn (≤1,300 chars ideal)
+- Professional but not stiff
+- Hook line → 3-4 short paragraphs with line breaks
+- Insight or lesson the reader can take away
+- End with 3-5 relevant hashtags
+
+#### Twitter/X (≤280 chars)
+- One punchy sentence or "take"
+- 1-2 hashtags max embedded in text
+- If a thread is better, write Tweet 1 + "Thread 🧵" then 3-4 follow-up tweets
+
+### Step 5 — Show preview and get approval
+
+Present all 4 posts + image in a clear preview:
+```
+🖼️ IMAGE: [embedded or path]
+
+📸 INSTAGRAM:
+[post text]
+
+👥 FACEBOOK:
+[post text]
+
+💼 LINKEDIN:
+[post text]
+
+🐦 TWITTER/X:
+[post text]
 ```
 
-If `.env` is missing or keys are blank, tell the user which keys are needed:
-- `OPENAI_API_KEY` — DALL-E + GPT-4o-mini
-- `ANTHROPIC_API_KEY` — Claude 3.7 Sonnet  
-- `PERPLEXITY_API_KEY` — article summarization
+Ask: "Which platforms should I publish to? (or say 'edit [platform]' to revise)"
 
-Optional (for live publishing):
-- `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` — Meta Graph API
-- `TWITTER_API_KEY/SECRET` + `TWITTER_ACCESS_TOKEN/SECRET` — Tweepy
-- `APPROVAL_EMAIL` + `GMAIL_APP_PASSWORD` — email previews
-- `GOOGLE_SHEETS_ID` + `GOOGLE_CREDENTIALS_FILE` — Sheets logging
+### Step 6 — Publish via Python poster
 
-### Step 3 — Install dependencies (if needed)
+For each approved platform, run the appropriate command from the
+`social-media-ai` project directory:
+
 ```bash
 cd /home/corsa/antigravity_projects/social-media-ai
-pip install -r requirements.txt -q
+
+# Instagram
+python poster.py instagram --caption "<caption>" --image "<image_path>"
+
+# Twitter/X
+python poster.py twitter --text "<tweet_text>"
+
+# Log all to Google Sheets
+python poster.py sheets --data "<json>"
 ```
 
-### Step 4 — Run the pipeline
+If credentials aren't set in `.env`, tell the user which ones are needed:
+- Instagram: `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID`
+- Twitter: `TWITTER_API_KEY/SECRET` + `TWITTER_ACCESS_TOKEN/SECRET`
 
-**Single article with CLI approval (default):**
-```bash
-cd /home/corsa/antigravity_projects/social-media-ai
-python main.py --url "<ARTICLE_URL>" --topic "<TOPIC>"
-```
-
-**Auto-approve, log to Sheets only (no publishing):**
-```bash
-python main.py --url "<ARTICLE_URL>" --topic "<TOPIC>" --auto-approve
-```
-
-**Auto-approve + publish live to Instagram & Twitter:**
-```bash
-python main.py --url "<ARTICLE_URL>" --topic "<TOPIC>" --publish
-```
-
-**Process all pending rows from Google Sheets:**
-```bash
-python main.py --auto-approve
-```
-
-### Step 5 — Report results
-After the run, tell the user:
-- ✅ Which platforms had posts generated
-- 🖼️ The DALL-E image URL
+### Step 7 — Confirm and report
+Tell the user:
+- ✅ Which platforms were published + post IDs/URLs
 - 📊 Whether posts were logged to Sheets
-- 📱 Whether posts were published live (and the post IDs)
-- ❌ Any errors and how to fix them
+- 💾 Image path saved locally in `social-media-ai/output/`
+- 🔁 Any edits needed or errors to fix
 
-## Common Issues
-
-| Problem | Fix |
-|---------|-----|
-| `ModuleNotFoundError` | Run `pip install -r requirements.txt` |
-| `AuthenticationError` | Check API keys in `.env` |
-| Instagram 400 error | Image URL must be publicly accessible (DALL-E URLs expire — host the image first) |
-| Sheets auth popup | First run only — browser will open for OAuth consent |
-| Twitter rate limit | Free tier allows ~17 posts/day |
-
-## Instagram Publishing Notes
-
-DALL-E URLs are temporary (expire in ~1 hour). For Instagram publishing:
-1. Download the image from the DALL-E URL
-2. Upload it to a public URL (Cloudflare R2, S3, or the site's `/public` folder)
-3. Pass the permanent URL to the Instagram Graph API
-
-The skill handles step 4's publish call — but the user must host the image first
-or create a permanent URL. Add a note in the output if publishing to Instagram.
-
-## Example Usage
-
-```
-User: "Can you create Instagram posts for my guitar tone guide article?"
-
-→ You: "Sure! I'll run the social media AI pipeline on that article.
-        Give me the URL and I'll generate an Instagram post, image, and
-        log everything to Sheets."
-
-→ Run: python main.py --url "https://musicgearspecialist.com/guides/guitar-tone-guide" \
-                      --topic "Guitar Tone Guide"
-```
+## Tips
+- For musicgearspecialist.com posts: use guitar/musician imagery, amber/warm tones
+- Instagram performs best with gear close-ups, not people
+- LinkedIn posts about "lessons from X gear" outperform pure promotional posts
+- Twitter: hot take or contrarian opinion performs better than informational
